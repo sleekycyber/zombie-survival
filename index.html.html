@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zombie Survival — 2D Shooter</title>
+<style>
+  *{box-sizing:border-box} body{margin:0;background:#10151b;color:#eef3f6;font-family:system-ui,Segoe UI,Arial,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh}
+  header{width:min(100%,1000px);padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+  h1{font-size:clamp(20px,4vw,30px);margin:0;color:#a9f16c;letter-spacing:1px}
+  .hud{display:flex;gap:14px;flex-wrap:wrap;font-weight:700;font-size:14px}.hud span{background:#202a33;padding:7px 11px;border-radius:8px}
+  .game-wrap{width:min(96vw,1000px);position:relative;border:2px solid #33434c;border-radius:12px;overflow:hidden;box-shadow:0 12px 40px #0008}
+  canvas{display:block;width:100%;height:auto;background:#18242a;cursor:crosshair}
+  .overlay{position:absolute;inset:0;background:#071015d9;display:flex;align-items:center;justify-content:center;text-align:center;padding:22px}
+  .panel{max-width:490px}.panel h2{font-size:clamp(28px,5vw,46px);margin:0 0 10px;color:#a9f16c}.panel p{line-height:1.55;color:#d3dde2}
+  button{background:#a9f16c;color:#15200f;font-weight:900;border:0;border-radius:9px;padding:12px 20px;font-size:16px;cursor:pointer}button:hover{filter:brightness(1.08)}
+  .help{width:min(96vw,1000px);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;color:#b9c5cb;font-size:13px;padding:12px 4px 20px}
+  .mobile{display:none;gap:8px;padding:8px 0 18px}.mobile button{min-width:56px;padding:12px}
+  @media(max-width:650px){.mobile{display:flex;flex-wrap:wrap;justify-content:center}.help{font-size:12px}}
+</style>
+</head>
+<body>
+<header><h1>☣ ZOMBIE SURVIVAL</h1><div class="hud"><span>❤️ Health: <b id="health">100</b></span><span>🔫 Ammo: <b id="ammo">∞</b></span><span>☠ Kills: <b id="kills">0</b></span><span>🏆 Level: <b id="wave">1</b></span><span>🧟 Level kills: <b id="levelKills">0/20</b></span></div></header>
+<div class="game-wrap">
+<canvas id="game" width="1000" height="600" aria-label="2D zombie shooter game"></canvas>
+<div class="overlay" id="overlay"><div class="panel"><h2 id="headline">SURVIVE THE NIGHT</h2><p id="intro">Grab your gun and survive the zombie horde. Aim with your mouse and shoot before they reach you.</p><p><b>Move:</b> WASD / Arrow keys &nbsp; <b>Shoot:</b> Click / Space</p><button id="start">START GAME</button></div></div>
+</div>
+<div class="mobile"><button data-key="w">▲</button><button data-key="a">◀</button><button data-key="s">▼</button><button data-key="d">▶</button><button id="mobileShoot">🔫 SHOOT</button></div>
+<div class="help"><span>WASD / Arrow keys = move</span><span>Mouse = aim · Click or hold Space = shoot</span><span>Tip: keep moving. Zombies get faster every wave!</span></div>
+<script>
+(() => {
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id);
+const W=canvas.width,H=canvas.height;
+let running=false,keys={},player,zombies=[],bullets=[],particles=[],kills=0,wave=1,levelKills=0,bossActive=false,bossPending=false,spawnTimer=0,shotCooldown=0,last=0,mouse={x:700,y:300},lastSpawn=0;
+function reset(){player={x:W/2,y:H/2,r:16,hp:100,speed:235,angle:0,invuln:0};zombies=[];bullets=[];particles=[];kills=0;wave=1;levelKills=0;bossActive=false;bossPending=false;spawnTimer=.4;shotCooldown=0;updateHud();}
+function updateHud(){$('health').textContent=Math.max(0,Math.ceil(player?.hp||0));$('kills').textContent=kills;$('wave').textContent=wave;$('levelKills').textContent=levelKills+'/20';}
+function start(){reset();running=true;$('overlay').style.display='none';last=performance.now();requestAnimationFrame(loop);}
+function end(win=false){running=false;$('headline').textContent=win?'YOU SURVIVED!':'YOU GOT EATEN!';$('intro').textContent=win?`You cleared ${kills} zombies. The night is yours… for now.`:`You took down ${kills} zombies. Try again and keep moving!`;$('start').textContent='PLAY AGAIN';$('overlay').style.display='flex';}
+function pos(e){const r=canvas.getBoundingClientRect();mouse.x=(e.clientX-r.left)*W/r.width;mouse.y=(e.clientY-r.top)*H/r.height;}
+canvas.addEventListener('mousemove',pos);canvas.addEventListener('mousedown',()=>keys.shoot=true);window.addEventListener('mouseup',()=>keys.shoot=false);
+window.addEventListener('keydown',e=>{const k=e.key.toLowerCase();keys[k]=true;if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k))e.preventDefault();if(k===' ')keys.shoot=true;});
+window.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;if(e.key===' ')keys.shoot=false;});
+$('start').onclick=start;
+document.querySelectorAll('[data-key]').forEach(b=>{let k=b.dataset.key;const on=e=>{e.preventDefault();keys[k]=true},off=e=>{e.preventDefault();keys[k]=false};b.addEventListener('touchstart',on,{passive:false});b.addEventListener('touchend',off,{passive:false});b.addEventListener('mousedown',on);b.addEventListener('mouseup',off);b.addEventListener('mouseleave',off);});
+$('mobileShoot').addEventListener('touchstart',e=>{e.preventDefault();keys.shoot=true},{passive:false});$('mobileShoot').addEventListener('touchend',()=>keys.shoot=false);
+function spawnZombie(){let side=Math.floor(Math.random()*4),x=side===0? -25:side===1?W+25:Math.random()*W,y=side===2?-25:side===3?H+25:Math.random()*H;
+zombies.push({x,y,r:14+Math.random()*5,hp:1+Math.floor((wave-1)/3),speed:38+Math.random()*22+wave*4,phase:Math.random()*6.28,isBoss:false});}
+function spawnBoss(){let side=Math.floor(Math.random()*4),x=side===0?-40:side===1?W+40:Math.random()*W,y=side===2?-40:side===3?H+40:Math.random()*H;
+zombies.push({x,y,r:32,hp:12+wave*3,maxHp:12+wave*3,speed:34+wave*2,phase:0,isBoss:true});bossActive=true;bossPending=false;
+}
+function shoot(){if(shotCooldown>0)return;shotCooldown=.17;let a=player.angle;bullets.push({x:player.x+Math.cos(a)*22,y:player.y+Math.sin(a)*22,vx:Math.cos(a)*650,vy:Math.sin(a)*650,r:4,life:1.1});for(let i=0;i<3;i++)particles.push({x:player.x+Math.cos(a)*24,y:player.y+Math.sin(a)*24,vx:Math.cos(a)* (40+Math.random()*100),vy:Math.sin(a)*(40+Math.random()*100),life:.12,size:2+Math.random()*2,color:'#ffd66b'});}
+function burst(x,y,color,n=8){for(let i=0;i<n;i++){let a=Math.random()*Math.PI*2,s=30+Math.random()*130;particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.25+Math.random()*.4,size:2+Math.random()*4,color});}}
+function update(dt){
+let dx=(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0),dy=(keys.s||keys.arrowdown?1:0)-(keys.w||keys.arrowup?1:0),len=Math.hypot(dx,dy)||1;
+player.x=Math.max(player.r,Math.min(W-player.r,player.x+dx/len*player.speed*dt));player.y=Math.max(player.r,Math.min(H-player.r,player.y+dy/len*player.speed*dt));
+player.angle=Math.atan2(mouse.y-player.y,mouse.x-player.x);player.invuln=Math.max(0,player.invuln-dt);shotCooldown=Math.max(0,shotCooldown-dt);
+if(keys.shoot||keys[' '])shoot();
+spawnTimer-=dt;if(spawnTimer<=0){if(bossPending&&!bossActive){spawnBoss();spawnTimer=999;}else if(!bossActive&&levelKills<20){spawnZombie();spawnTimer=Math.max(.24,1.15-wave*.075);}else spawnTimer=.25;}
+for(let b of bullets){b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;for(let z of zombies){if(z.hp>0&&Math.hypot(b.x-z.x,b.y-z.y)<z.r+b.r){z.hp--;b.life=0;burst(b.x,b.y,'#f7d774',3);if(z.hp<=0){kills++;if(z.isBoss){burst(z.x,z.y,'#ffb347',30);bossActive=false;wave++;levelKills=0;spawnTimer=1.5;}else{burst(z.x,z.y,'#78b84c',12);levelKills++;if(levelKills>=20){levelKills=20;bossPending=true;spawnTimer=1.2;}}}break;}}}
+bullets=bullets.filter(b=>b.life>0&&b.x>-10&&b.x<W+10&&b.y>-10&&b.y<H+10);
+for(let z of zombies){let a=Math.atan2(player.y-z.y,player.x-z.x);z.x+=Math.cos(a)*z.speed*dt;z.y+=Math.sin(a)*z.speed*dt;z.phase+=dt*5;if(Math.hypot(player.x-z.x,player.y-z.y)<player.r+z.r&&player.invuln<=0){player.hp-=13;player.invuln=.65;burst(player.x,player.y,'#e94e54',7);if(player.hp<=0){updateHud();end();return;}}}
+zombies=zombies.filter(z=>z.hp>0);
+for(let p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;p.vx*=.97;p.vy*=.97;}particles=particles.filter(p=>p.life>0);updateHud();
+}
+function draw(){
+ctx.clearRect(0,0,W,H);ctx.fillStyle='#18242a';ctx.fillRect(0,0,W,H);
+// floor grid and cracks
+ctx.strokeStyle='#26353a';ctx.lineWidth=1;for(let x=0;x<W;x+=50){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}for(let y=0;y<H;y+=50){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+for(let i=0;i<16;i++){let x=(i*173+60)%W,y=(i*97+30)%H;ctx.fillStyle='#202e32';ctx.fillRect(x,y,20,4);}
+ // zombies
+for(let z of zombies){ctx.save();ctx.translate(z.x,z.y);ctx.rotate(Math.sin(z.phase)*.12);ctx.fillStyle=z.isBoss?'#572b35':'#34482c';ctx.beginPath();ctx.arc(0,2,z.r,0,Math.PI*2);ctx.fill();ctx.fillStyle=z.isBoss?'#c13e4e':'#638b45';ctx.beginPath();ctx.arc(0,-3,z.r*.75,0,Math.PI*2);ctx.fill();ctx.fillStyle=z.isBoss?'#fff0a0':'#f5e8b0';ctx.fillRect(-z.r*.48,-z.r*.25,z.isBoss?8:4,z.isBoss?7:4);ctx.fillRect(z.r*.2,-z.r*.25,z.isBoss?8:4,z.isBoss?7:4);ctx.fillStyle='#29321e';ctx.fillRect(-z.r*.35,z.r*.3,z.r*.7,4);if(z.isBoss){ctx.restore();ctx.fillStyle='#101010';ctx.fillRect(z.x-38,z.y-z.r-17,76,7);ctx.fillStyle='#ff525e';ctx.fillRect(z.x-38,z.y-z.r-17,76*Math.max(0,z.hp/z.maxHp),7);ctx.fillStyle='#fff';ctx.font='bold 13px system-ui';ctx.textAlign='center';ctx.fillText('BOSS',z.x,z.y-z.r-22);continue;}ctx.restore();}
+ // bullets
+for(let b of bullets){ctx.fillStyle='#ffe28a';ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();}
+ // particles
+for(let p of particles){ctx.globalAlpha=Math.max(0,p.life*2);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;
+ // player shadow
+ctx.fillStyle='#080d10';ctx.beginPath();ctx.ellipse(player.x+2,player.y+8,17,10,0,0,Math.PI*2);ctx.fill();
+ctx.save();ctx.translate(player.x,player.y);ctx.rotate(player.angle);
+ctx.fillStyle='#314c68';ctx.beginPath();ctx.arc(0,0,player.r,0,Math.PI*2);ctx.fill();
+ctx.fillStyle='#d6a47e';ctx.beginPath();ctx.arc(3,-2,9,0,Math.PI*2);ctx.fill();
+ctx.fillStyle='#273039';ctx.fillRect(4,-7,22,9);ctx.fillStyle='#89949b';ctx.fillRect(19,-5,16,5);ctx.fillStyle='#111820';ctx.fillRect(10,1,6,9);
+ctx.restore();
+if(player.invuln>0&&Math.floor(player.invuln*20)%2===0){ctx.strokeStyle='#ff7777';ctx.lineWidth=3;ctx.beginPath();ctx.arc(player.x,player.y,player.r+5,0,Math.PI*2);ctx.stroke();}
+ // crosshair
+ctx.strokeStyle='#d5e3dc';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(mouse.x,mouse.y,8,0,Math.PI*2);ctx.moveTo(mouse.x-13,mouse.y);ctx.lineTo(mouse.x-4,mouse.y);ctx.moveTo(mouse.x+4,mouse.y);ctx.lineTo(mouse.x+13,mouse.y);ctx.moveTo(mouse.x,mouse.y-13);ctx.lineTo(mouse.x,mouse.y-4);ctx.moveTo(mouse.x,mouse.y+4);ctx.lineTo(mouse.x,mouse.y+13);ctx.stroke();
+}
+function loop(t){if(!running)return;let dt=Math.min(.033,(t-last)/1000||0);last=t;update(dt);draw();if(running)requestAnimationFrame(loop);}
+reset();draw();
+})();
+</script>
+</body>
+</html>
